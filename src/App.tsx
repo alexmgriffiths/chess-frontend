@@ -1,15 +1,85 @@
-import { useState } from "react";
+import { useState, useEffect, } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from 'react-chessboard';
 import { Piece, Square } from "react-chessboard/dist/chessboard/types";
 
-function App() {
+function App(props: any) {
+  const [socket, setSocket]: any = useState();
+  const [userId, setUserId]: any = useState();
+  const [gameId, setGameId]: any = useState();
+
+  const [serverMessages, setServerMessages]: any = useState([]);
+
+  const [opponent, setOpponent]: any = useState("");
+  const [gameReady, setGameReady]: any = useState(false);
+  const [playerColor, setPlayerColor]: any = useState("white");
   const [game, setGame] = useState(new Chess());
   const [gameComment, setGameComment] = useState("");
   const [moveFrom, setMoveFrom] = useState("");
   const [squareOptions, setSquareOptions] = useState({});
   const [rightClickedSquares, setRightClickedSquares]: any = useState();
   const [hintSquares, setHintSquares] = useState({});
+
+  useEffect(() => {
+    const search = window.location.search;
+    const params = new URLSearchParams(search);
+    const tempGameId = params.get('gameId') ?? Math.floor(Math.random() * 100000);
+    const tempUserId = params.get("userId") ?? Math.floor(Math.random() * 10000);
+    setUserId(tempUserId);
+    setGameId(tempGameId);
+
+    const socketConnection: WebSocket = new WebSocket("ws://localhost:8080");
+    socketConnection.onopen = (e: any) => {
+      const serverPingMessage = JSON.stringify({type: "PING"});
+      socketConnection.send(serverPingMessage);
+      const serverMessage = JSON.stringify({type: "START", data: {
+        userId: tempUserId,
+        gameId: tempGameId
+      }});
+      socketConnection.send(serverMessage);
+    }
+    socketConnection.onmessage = (event: any) => {
+      const data = JSON.parse(event.data as unknown as string);
+      switch(data.type) {
+        case "PONG":
+          console.log("PONG event handled");
+        break;
+        case "UPDATE":
+          const { pgn } = data;
+          const gameCopy = new Chess();
+          gameCopy.loadPgn(pgn);
+          setGame(gameCopy);
+        break;
+        case "ERROR":
+          const { error } = data;
+          console.log(error);
+        break;
+        case "MESSAGE":
+          const { message } = data;
+          const serverMessagesCopy = serverMessages;
+          serverMessagesCopy.push(message);
+          setServerMessages(serverMessagesCopy);
+        break;
+        case "INIT":
+          const { color } = data;
+          setPlayerColor(color);
+        break;
+        case "START":
+          const { opponent } = data;
+          setOpponent(opponent);
+          game.header(opponent);
+          setGameReady(true);
+        break;
+      }
+    }
+    setSocket(socketConnection);
+  }, []);
+
+  useEffect(() => {
+    if(game.isCheckmate()) {
+      alert("Get shit on");
+    }
+  }, [game]);
 
   const pieces = ["wP", "wN", "wB", "wR", "wQ", "wK", "bP", "bN", "bB", "bR", "bQ", "bK"];
   const customPieces = () => {
@@ -30,24 +100,12 @@ function App() {
     return returnPieces;
   };
 
-  const makeMove = (from: Square, to: Square, promotion: string = "q") => {
+  const makeMove = (from: Square, to: Square, piece: Piece = "wP", promotion: string = "q") => {
     try {
-      const gameCopy = new Chess();
-      gameCopy.loadPgn(game.pgn());
-      gameCopy.move({from, to});
-      setGame(gameCopy);
+      const serverMessage = JSON.stringify({type: "MOVE", data: { from, to, gameId, userId }});
+      socket.send(serverMessage);
       return true;
     } catch (e: any) {
-      return false;
-    }
-  }
-
-  const onDrop = (from: Square, to: Square, piece: Piece) => {
-    const moveResult = makeMove(from, to, "q");
-    if(moveResult) {
-      setGameComment(game.getComment());
-      return true;
-    } else {
       return false;
     }
   }
@@ -55,6 +113,10 @@ function App() {
   const getMoveOptions = (square: Square) => {
     const moves = game.moves({square, verbose: true});
     if(moves.length === 0) {
+      return false;
+    }
+
+    if(game.get(square).color !== playerColor.substring(0, 1)) {
       return false;
     }
 
@@ -78,6 +140,7 @@ function App() {
 
   const onSquareClick = (square: Square) => {
     setRightClickedSquares({});
+
     function resetFirstMove(square: Square) {
       const hasOptions = getMoveOptions(square);
       if(hasOptions) setMoveFrom(square);
@@ -89,10 +152,7 @@ function App() {
     }
 
     try {
-      const gameCopy = new Chess();
-      gameCopy.loadPgn(game.pgn());
-      gameCopy.move({from: moveFrom, to: square});
-      setGame(gameCopy);
+      makeMove(moveFrom as Square, square);
       setMoveFrom("");
       setSquareOptions({});
       return true;
@@ -124,10 +184,7 @@ function App() {
     setRightClickedSquares({});
     setMoveFrom("");
     try {
-      const gameCopy = new Chess();
-      gameCopy.loadPgn(game.pgn());
-      gameCopy.move({from: source, to: target});
-      setGame(gameCopy);
+      makeMove(source, target, piece);
       setMoveFrom("");
       setSquareOptions({});
       return true;
@@ -136,12 +193,21 @@ function App() {
     }
   }
 
+  if(!gameReady) {
+    return (
+      <>
+        <h1>Waiting for opponent...</h1>
+        <h3>Game ID: {gameId}</h3>
+      </>
+    )
+  }
+
   return (
     <div id="page">
       <Chessboard 
         boardWidth={720} 
         position={game.fen()}
-        arePiecesDraggable={true}
+        arePiecesDraggable={false}
         onPieceDragBegin={onPieceDrag}
         onPieceDrop={onPieceDragEnd}
         onSquareClick={onSquareClick}
@@ -159,9 +225,13 @@ function App() {
           ...rightClickedSquares,
           ...hintSquares,
         }}
+        boardOrientation={playerColor}
       />
-      <h1>Comment: {gameComment}</h1>
+      <h1>User Id: {userId}</h1>
+      <h1>Opponent Id: {opponent}</h1>
+      <h1>Game ID: {gameId}</h1>
       <h3>FEN: {game.fen()}</h3>
+      {game.pgn()}
     </div>
   )
 }
