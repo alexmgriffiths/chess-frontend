@@ -8,6 +8,27 @@ function App() {
   const [gameComment, setGameComment] = useState("");
   const [moveFrom, setMoveFrom] = useState("");
   const [squareOptions, setSquareOptions] = useState({});
+  const [rightClickedSquares, setRightClickedSquares]: any = useState();
+  const [hintSquares, setHintSquares] = useState({});
+
+  const pieces = ["wP", "wN", "wB", "wR", "wQ", "wK", "bP", "bN", "bB", "bR", "bQ", "bK"];
+  const customPieces = () => {
+    const returnPieces: any = {};
+    pieces.map((p) => {
+      returnPieces[p] = ({ squareWidth }: any) => (
+        <div
+          style={{
+            width: squareWidth,
+            height: squareWidth,
+            backgroundImage: `url(/pieces/${p}.png)`,
+            backgroundSize: "100%",
+          }}
+        />
+      );
+      return null;
+    });
+    return returnPieces;
+  };
 
   const makeMove = (from: Square, to: Square, promotion: string = "q") => {
     try {
@@ -56,6 +77,7 @@ function App() {
   }
 
   const onSquareClick = (square: Square) => {
+    setRightClickedSquares({});
     function resetFirstMove(square: Square) {
       const hasOptions = getMoveOptions(square);
       if(hasOptions) setMoveFrom(square);
@@ -81,25 +103,65 @@ function App() {
 
   }
 
+  const onSquareRightClick = (square: Square) => {
+    const colour = "rgba(0, 0, 255, 0.4)";
+    setRightClickedSquares({
+      ...rightClickedSquares,
+      [square]:
+        rightClickedSquares[square] &&
+        rightClickedSquares[square].backgroundColor === colour
+          ? undefined
+          : { backgroundColor: colour },
+    });
+  }
+
+  const onPieceDrag = (piece: Piece, square: Square) => {
+    const hasOptions = getMoveOptions(square);
+    if(hasOptions) setMoveFrom(square);
+  }
+
+  const onPieceDragEnd = (source: Square, target: Square, piece: Piece) => {
+    setRightClickedSquares({});
+    setMoveFrom("");
+    try {
+      const gameCopy = new Chess();
+      gameCopy.loadPgn(game.pgn());
+      gameCopy.move({from: source, to: target});
+      setGame(gameCopy);
+      setMoveFrom("");
+      setSquareOptions({});
+      return true;
+    } catch (e: any) {
+      return false;
+    }
+  }
+
   return (
     <div id="page">
       <Chessboard 
-        boardWidth={560} 
+        boardWidth={720} 
         position={game.fen()}
-        arePiecesDraggable={false}
+        arePiecesDraggable={true}
+        onPieceDragBegin={onPieceDrag}
+        onPieceDrop={onPieceDragEnd}
         onSquareClick={onSquareClick}
-        //onSquareRightClick={onSquareRightClick}
+        onSquareRightClick={onSquareRightClick}
         customBoardStyle={{
           borderRadius: "4px",
           boxShadow: "0 2px 10px rgba(0, 0, 0, 0.5)",
         }}
+        customDarkSquareStyle={{ backgroundColor: "#779952" }}
+        customLightSquareStyle={{ backgroundColor: "#edeed1" }}
+        customPieces={customPieces()}
         customSquareStyles={{
           //...moveSquares,
           ...squareOptions,
-          //...rightClickedSquares,
+          ...rightClickedSquares,
+          ...hintSquares,
         }}
       />
-      <h1>{gameComment}</h1>
+      <h1>Comment: {gameComment}</h1>
+      <h3>FEN: {game.fen()}</h3>
     </div>
   )
 }
